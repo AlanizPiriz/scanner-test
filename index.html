@@ -512,11 +512,16 @@ async function startBarcodeScan() {
 
   try {
     bcCodeReader = new ZXing.BrowserMultiFormatReader();
-    const devices = await ZXing.BrowserCodeReader.listVideoInputDevices();
-    // preferir cámara trasera si existe
-    let deviceId = devices[0]?.deviceId;
-    const backCam = devices.find(d => /back|rear|environment/i.test(d.label));
-    if (backCam) deviceId = backCam.deviceId;
+
+    let deviceId = undefined;
+    try {
+      const devices = await bcCodeReader.listVideoInputDevices();
+      deviceId = devices[0]?.deviceId;
+      const backCam = devices.find(d => /back|rear|environment|trasera/i.test(d.label));
+      if (backCam) deviceId = backCam.deviceId;
+    } catch (enumErr) {
+      log('No se pudo enumerar cámaras, se usará la cámara por defecto: ' + enumErr.message);
+    }
 
     bcStatus.textContent = 'Buscando código...';
     bcDot.className = 'dot live';
