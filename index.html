@@ -1,0 +1,803 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Prueba: Escaneo + OCR vencimiento</title>
+
+<script src="https://unpkg.com/@zxing/library@0.20.0/umd/index.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.0.4/dist/tesseract.min.js"></script>
+
+<style>
+  :root{
+    --bg: #0e1410;
+    --panel: #161d18;
+    --panel-2: #1d2620;
+    --line: #2a352e;
+    --text: #eaf0ea;
+    --text-dim: #9fb0a3;
+    --accent: #6be37a;
+    --accent-dim: #2f5c38;
+    --warn: #e3b96b;
+    --err: #e36b6b;
+    --mono: 'SF Mono', 'Consolas', 'Menlo', monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  header {
+    padding: 16px 18px 14px;
+    border-bottom: 1px solid var(--line);
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+    z-index: 10;
+  }
+
+  header h1 {
+    margin: 0;
+    font-size: 17px;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+  }
+
+  header .sub {
+    margin-top: 3px;
+    font-size: 12.5px;
+    color: var(--text-dim);
+    font-family: var(--mono);
+  }
+
+  main {
+    max-width: 480px;
+    margin: 0 auto;
+    padding: 16px;
+    padding-bottom: 80px;
+  }
+
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 16px;
+    margin-bottom: 14px;
+  }
+
+  .card h2 {
+    margin: 0 0 4px;
+    font-size: 14px;
+    font-weight: 650;
+  }
+
+  .card .hint {
+    margin: 0 0 12px;
+    font-size: 12.5px;
+    color: var(--text-dim);
+    line-height: 1.45;
+  }
+
+  button {
+    appearance: none;
+    border: none;
+    border-radius: 11px;
+    padding: 13px 16px;
+    font-size: 14.5px;
+    font-weight: 600;
+    width: 100%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: transform .08s ease, opacity .15s ease;
+  }
+  button:active { transform: scale(0.985); }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .btn-primary { background: var(--accent); color: #07140a; }
+  .btn-secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); }
+  .btn-danger { background: transparent; color: var(--err); border: 1px solid #4a2a2a; }
+
+  .video-wrap {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 4/3;
+    background: #000;
+    border-radius: 12px;
+    overflow: hidden;
+    margin-bottom: 12px;
+  }
+  video { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+  .scan-frame {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .scan-frame .box {
+    width: 78%;
+    height: 34%;
+    border: 2px solid var(--accent);
+    border-radius: 10px;
+    box-shadow: 0 0 0 1000px rgba(0,0,0,0.35);
+  }
+  .scan-frame.ocr .box {
+    width: 82%;
+    height: 22%;
+  }
+  .scan-line {
+    position: absolute;
+    left: 11%;
+    width: 78%;
+    height: 2px;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent);
+    animation: scanmove 1.8s ease-in-out infinite;
+  }
+  @keyframes scanmove {
+    0% { top: 33%; }
+    50% { top: 67%; }
+    100% { top: 33%; }
+  }
+
+  .status-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12.5px;
+    color: var(--text-dim);
+    font-family: var(--mono);
+    margin-bottom: 10px;
+    min-height: 16px;
+  }
+  .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--text-dim);
+    flex-shrink: 0;
+  }
+  .dot.live { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+  .dot.busy { background: var(--warn); animation: pulse 1s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+  .field {
+    margin-bottom: 12px;
+  }
+  .field label {
+    display: block;
+    font-size: 11.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+    font-weight: 600;
+  }
+  .field input {
+    width: 100%;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    padding: 11px 12px;
+    color: var(--text);
+    font-size: 15px;
+    font-family: var(--mono);
+  }
+  .field input:focus {
+    outline: none;
+    border-color: var(--accent-dim);
+  }
+  .field input.warn-border { border-color: var(--warn); }
+
+  .product-hit {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    background: var(--panel-2);
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin-bottom: 12px;
+  }
+  .product-hit .emoji { font-size: 26px; }
+  .product-hit .pname { font-weight: 650; font-size: 14.5px; }
+  .product-hit .pcode { font-size: 11.5px; color: var(--text-dim); font-family: var(--mono); margin-top: 1px; }
+
+  .product-hit.not-found {
+    border: 1px dashed #4a3a2a;
+  }
+  .product-hit.not-found .pname { color: var(--warn); }
+
+  .readout {
+    background: var(--panel-2);
+    border: 1px solid var(--accent-dim);
+    border-radius: 9px;
+    padding: 10px 12px;
+    margin-bottom: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .readout-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-dim);
+    font-weight: 650;
+  }
+  .readout-value {
+    font-family: var(--mono);
+    font-size: 17px;
+    font-weight: 700;
+    color: var(--accent);
+    word-break: break-all;
+  }
+
+  .ocr-raw {
+    background: #0a0e0b;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 9px 10px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--text-dim);
+    margin-bottom: 12px;
+    max-height: 60px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  .confidence-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    padding: 3px 9px;
+    border-radius: 100px;
+    font-weight: 650;
+    font-family: var(--mono);
+  }
+  .confidence-badge.high { background: rgba(107,227,122,0.15); color: var(--accent); }
+  .confidence-badge.low { background: rgba(227,185,107,0.15); color: var(--warn); }
+  .confidence-badge.none { background: rgba(227,107,107,0.15); color: var(--err); }
+
+  .btn-row { display: flex; gap: 10px; }
+  .btn-row button { flex: 1; }
+
+  /* Lista */
+  .list-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    background: var(--panel-2);
+    border-radius: 10px;
+    margin-bottom: 8px;
+  }
+  .list-item .emoji { font-size: 24px; flex-shrink: 0; }
+  .list-item .info { flex: 1; min-width: 0; }
+  .list-item .info .name { font-weight: 650; font-size: 14px; }
+  .list-item .info .meta { font-size: 11.5px; color: var(--text-dim); font-family: var(--mono); margin-top: 2px; }
+  .list-item .exp {
+    font-size: 12.5px;
+    font-family: var(--mono);
+    font-weight: 650;
+    padding: 4px 8px;
+    border-radius: 6px;
+    flex-shrink: 0;
+  }
+  .list-item .exp.ok { background: rgba(107,227,122,0.12); color: var(--accent); }
+  .list-item .exp.soon { background: rgba(227,185,107,0.12); color: var(--warn); }
+  .list-item .exp.expired { background: rgba(227,107,107,0.12); color: var(--err); }
+  .list-item .del {
+    width: 26px; height: 26px;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 16px;
+    flex-shrink: 0;
+    padding: 0;
+  }
+
+  .empty-state {
+    text-align: center;
+    padding: 30px 10px;
+    color: var(--text-dim);
+    font-size: 13px;
+  }
+
+  .step-label {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    background: var(--accent-dim);
+    color: var(--accent);
+    font-size: 11px;
+    font-weight: 700;
+    margin-right: 6px;
+  }
+
+  .manual-toggle {
+    font-size: 12px;
+    color: var(--text-dim);
+    text-align: center;
+    margin-top: 4px;
+    text-decoration: underline;
+    cursor: pointer;
+  }
+
+  .hidden { display: none !important; }
+
+  footer-bar {
+    display: block;
+  }
+
+  .log {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: #4a5750;
+    margin-top: 16px;
+    padding: 10px;
+    background: #0a0e0b;
+    border-radius: 8px;
+    max-height: 90px;
+    overflow-y: auto;
+    line-height: 1.5;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>📦 Prueba de escaneo</h1>
+  <div class="sub">código de barras → OCR vencimiento → lista local</div>
+</header>
+
+<main>
+
+  <!-- PASO 1: ESCANEAR CODIGO DE BARRAS -->
+  <div class="card" id="card-barcode">
+    <h2><span class="step-label">1</span>Escanear código de barras</h2>
+    <p class="hint">Apuntá la cámara al código de barras del producto: la lectura del número es 100% real (cámara + librería de escaneo). Lo que es de prueba es la "base de productos" — son solo 6 productos inventados, así que si tu código real no está ahí vas a ver "no encontrado", pero el número leído va a ser el correcto.</p>
+
+    <div id="barcode-video-area" class="hidden">
+      <div class="video-wrap">
+        <video id="bc-video" playsinline autoplay muted></video>
+        <div class="scan-frame"><div class="box"></div></div>
+        <div class="scan-line"></div>
+      </div>
+      <div class="status-row"><span class="dot live" id="bc-dot"></span><span id="bc-status">Buscando código...</span></div>
+    </div>
+
+    <button class="btn-primary" id="btn-start-barcode">📷 Abrir cámara y escanear</button>
+    <button class="btn-danger hidden" id="btn-stop-barcode" style="margin-top:8px;">Cancelar escaneo</button>
+
+    <div id="barcode-readout-area" class="hidden"></div>
+
+    <div class="manual-toggle" id="toggle-manual-code">o ingresar código manualmente</div>
+    <div class="field hidden" id="manual-code-field" style="margin-top:10px;">
+      <label>Código de barras</label>
+      <input type="text" id="manual-code-input" placeholder="ej: 7790070418015" inputmode="numeric">
+      <button class="btn-secondary" style="margin-top:8px;" id="btn-manual-code-submit">Usar este código</button>
+    </div>
+  </div>
+
+  <!-- PASO 2: RESULTADO DEL PRODUCTO -->
+  <div class="card hidden" id="card-product">
+    <h2><span class="step-label">2</span>Producto encontrado</h2>
+    <div id="product-hit-area"></div>
+    <button class="btn-primary" id="btn-go-ocr">📅 Escanear fecha de vencimiento</button>
+    <button class="btn-secondary" id="btn-rescan-code" style="margin-top:8px;">Volver a escanear código</button>
+  </div>
+
+  <!-- PASO 3: OCR FECHA -->
+  <div class="card hidden" id="card-ocr">
+    <h2><span class="step-label">3</span>Fecha de vencimiento (OCR)</h2>
+    <p class="hint">Enfocá bien la fecha impresa en el envase. El sistema va a intentar leerla — confirmá o corregí antes de agregar a la lista.</p>
+
+    <div id="ocr-video-area">
+      <div class="video-wrap">
+        <video id="ocr-video" playsinline autoplay muted></video>
+        <div class="scan-frame ocr"><div class="box"></div></div>
+      </div>
+      <button class="btn-primary" id="btn-capture-ocr">📸 Capturar fecha</button>
+    </div>
+
+    <div id="ocr-result-area" class="hidden">
+      <div class="status-row" id="ocr-status-row">
+        <span class="dot busy" id="ocr-dot"></span>
+        <span id="ocr-status">Procesando imagen con OCR...</span>
+      </div>
+
+      <div class="ocr-raw hidden" id="ocr-raw-box"></div>
+
+      <div class="field">
+        <label>Fecha detectada <span id="ocr-confidence"></span></label>
+        <input type="date" id="ocr-date-input">
+      </div>
+
+      <div class="btn-row">
+        <button class="btn-secondary" id="btn-retry-ocr">🔄 Reintentar foto</button>
+        <button class="btn-primary" id="btn-confirm-date">✅ Confirmar y agregar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- LISTA -->
+  <div class="card">
+    <h2>📋 Productos agregados</h2>
+    <p class="hint">Lista local de esta sesión (no se guarda al cerrar).</p>
+    <div id="list-area">
+      <div class="empty-state">Todavía no agregaste ningún producto.</div>
+    </div>
+  </div>
+
+  <div class="log" id="debug-log">esperando acción...</div>
+
+</main>
+
+<canvas id="hidden-canvas" class="hidden"></canvas>
+
+<script>
+// =====================================================================
+// "BASE DE DATOS" DE PRODUCTOS DE PRUEBA
+// En el sistema real esto sería una consulta a tu backend / API
+// =====================================================================
+const FAKE_PRODUCT_DB = {
+  "7790070418015": { name: "Leche entera La Serenísima 1L", emoji: "🥛" },
+  "7791234567890": { name: "Yogur Ser Bebible Frutilla 900g", emoji: "🍓" },
+  "7794000111224": { name: "Fideos Matarazzo Tallarines 500g", emoji: "🍝" },
+  "7790580001234": { name: "Queso Cremoso La Paulina 500g", emoji: "🧀" },
+  "7790895000017": { name: "Galletitas Express 6 de Oro", emoji: "🍪" },
+  "5449000000996": { name: "Coca-Cola 1.5L", emoji: "🥤" },
+};
+// Códigos de prueba que podés escribir manualmente para probar rápido
+// sin tener un producto físico a mano:
+//   7790070418015, 7791234567890, 7794000111224
+
+let addedProducts = [];
+
+function log(msg) {
+  const el = document.getElementById('debug-log');
+  const time = new Date().toLocaleTimeString();
+  el.innerHTML = `[${time}] ${msg}<br>` + el.innerHTML;
+}
+
+// =====================================================================
+// PASO 1: ESCANEO DE CÓDIGO DE BARRAS (ZXing)
+// =====================================================================
+let bcCodeReader = null;
+let bcStream = null;
+let currentBarcode = null;
+
+const btnStartBarcode = document.getElementById('btn-start-barcode');
+const btnStopBarcode = document.getElementById('btn-stop-barcode');
+const barcodeVideoArea = document.getElementById('barcode-video-area');
+const bcVideo = document.getElementById('bc-video');
+const bcStatus = document.getElementById('bc-status');
+const bcDot = document.getElementById('bc-dot');
+
+btnStartBarcode.addEventListener('click', startBarcodeScan);
+btnStopBarcode.addEventListener('click', stopBarcodeScan);
+
+document.getElementById('toggle-manual-code').addEventListener('click', () => {
+  document.getElementById('manual-code-field').classList.toggle('hidden');
+});
+
+document.getElementById('btn-manual-code-submit').addEventListener('click', () => {
+  const val = document.getElementById('manual-code-input').value.trim();
+  if (!val) return;
+  stopBarcodeScan();
+  handleBarcodeResult(val);
+});
+
+async function startBarcodeScan() {
+  log('Iniciando cámara para código de barras...');
+  btnStartBarcode.classList.add('hidden');
+  btnStopBarcode.classList.remove('hidden');
+  barcodeVideoArea.classList.remove('hidden');
+  bcStatus.textContent = 'Iniciando cámara...';
+  bcDot.className = 'dot busy';
+
+  try {
+    bcCodeReader = new ZXing.BrowserMultiFormatReader();
+    const devices = await ZXing.BrowserCodeReader.listVideoInputDevices();
+    // preferir cámara trasera si existe
+    let deviceId = devices[0]?.deviceId;
+    const backCam = devices.find(d => /back|rear|environment/i.test(d.label));
+    if (backCam) deviceId = backCam.deviceId;
+
+    bcStatus.textContent = 'Buscando código...';
+    bcDot.className = 'dot live';
+
+    bcCodeReader.decodeFromVideoDevice(deviceId, 'bc-video', (result, err) => {
+      if (result) {
+        log('Código detectado: ' + result.getText());
+        bcStatus.textContent = '¡Detectado!';
+        stopBarcodeScan();
+        handleBarcodeResult(result.getText());
+      }
+      // los errores de "no encontrado en este frame" son normales y se ignoran
+    });
+  } catch (e) {
+    log('Error al acceder a la cámara: ' + e.message);
+    bcStatus.textContent = 'Error: no se pudo acceder a la cámara (' + e.message + ')';
+    bcDot.className = 'dot';
+  }
+}
+
+function stopBarcodeScan() {
+  if (bcCodeReader) {
+    bcCodeReader.reset();
+    bcCodeReader = null;
+  }
+  btnStartBarcode.classList.remove('hidden');
+  btnStopBarcode.classList.add('hidden');
+  barcodeVideoArea.classList.add('hidden');
+}
+
+function handleBarcodeResult(code) {
+  currentBarcode = code;
+  const product = FAKE_PRODUCT_DB[code];
+
+  // Esto SIEMPRE es el código real leído por la cámara (o tipeado a mano).
+  // Lo mostramos aparte para que se vea claro que la lectura funcionó,
+  // independientemente de si está o no en la base de prueba.
+  const readoutArea = document.getElementById('barcode-readout-area');
+  readoutArea.innerHTML = `
+    <div class="readout">
+      <span class="readout-label">Código leído por la cámara:</span>
+      <span class="readout-value">${code}</span>
+    </div>`;
+  readoutArea.classList.remove('hidden');
+
+  const area = document.getElementById('product-hit-area');
+  if (product) {
+    area.innerHTML = `
+      <div class="product-hit">
+        <div class="emoji">${product.emoji}</div>
+        <div>
+          <div class="pname">${product.name}</div>
+          <div class="pcode">${code}</div>
+        </div>
+      </div>`;
+    log('Producto encontrado en la base de prueba: ' + product.name);
+  } else {
+    area.innerHTML = `
+      <div class="product-hit not-found">
+        <div class="emoji">❓</div>
+        <div>
+          <div class="pname">No está en la base de prueba (normal: la base solo tiene 6 productos inventados)</div>
+          <div class="pcode">${code}</div>
+        </div>
+      </div>`;
+    log('Código real leído correctamente, pero no existe en la base de prueba (es esperado).');
+  }
+
+  document.getElementById('card-product').classList.remove('hidden');
+  document.getElementById('card-product').scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+document.getElementById('btn-rescan-code').addEventListener('click', () => {
+  document.getElementById('card-product').classList.add('hidden');
+  document.getElementById('card-ocr').classList.add('hidden');
+  stopOcrCamera();
+});
+
+// =====================================================================
+// PASO 2 -> 3: OCR DE FECHA DE VENCIMIENTO (Tesseract.js)
+// =====================================================================
+let ocrStream = null;
+const ocrVideo = document.getElementById('ocr-video');
+
+document.getElementById('btn-go-ocr').addEventListener('click', async () => {
+  document.getElementById('card-ocr').classList.remove('hidden');
+  document.getElementById('ocr-video-area').classList.remove('hidden');
+  document.getElementById('ocr-result-area').classList.add('hidden');
+  document.getElementById('card-ocr').scrollIntoView({behavior:'smooth', block:'start'});
+  await startOcrCamera();
+});
+
+async function startOcrCamera() {
+  log('Iniciando cámara para OCR de fecha...');
+  try {
+    ocrStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' } }
+    });
+    ocrVideo.srcObject = ocrStream;
+  } catch (e) {
+    log('Error cámara OCR: ' + e.message);
+    alert('No se pudo abrir la cámara: ' + e.message);
+  }
+}
+
+function stopOcrCamera() {
+  if (ocrStream) {
+    ocrStream.getTracks().forEach(t => t.stop());
+    ocrStream = null;
+  }
+}
+
+document.getElementById('btn-capture-ocr').addEventListener('click', captureAndRunOcr);
+document.getElementById('btn-retry-ocr').addEventListener('click', () => {
+  document.getElementById('ocr-video-area').classList.remove('hidden');
+  document.getElementById('ocr-result-area').classList.add('hidden');
+  startOcrCamera();
+});
+
+async function captureAndRunOcr() {
+  const canvas = document.getElementById('hidden-canvas');
+  canvas.width = ocrVideo.videoWidth;
+  canvas.height = ocrVideo.videoHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(ocrVideo, 0, 0, canvas.width, canvas.height);
+
+  stopOcrCamera();
+  document.getElementById('ocr-video-area').classList.add('hidden');
+  document.getElementById('ocr-result-area').classList.remove('hidden');
+
+  const statusRow = document.getElementById('ocr-status-row');
+  const statusText = document.getElementById('ocr-status');
+  const ocrDot = document.getElementById('ocr-dot');
+  const rawBox = document.getElementById('ocr-raw-box');
+  const confSpan = document.getElementById('ocr-confidence');
+  const dateInput = document.getElementById('ocr-date-input');
+
+  rawBox.classList.add('hidden');
+  confSpan.innerHTML = '';
+  dateInput.value = '';
+  dateInput.classList.remove('warn-border');
+  statusText.textContent = 'Procesando imagen con OCR (puede tardar unos segundos)...';
+  ocrDot.className = 'dot busy';
+  log('Capturada imagen, iniciando OCR con Tesseract...');
+
+  try {
+    const dataUrl = canvas.toDataURL('image/png');
+    const { data } = await Tesseract.recognize(dataUrl, 'eng', {
+      logger: m => {
+        if (m.status === 'recognizing text') {
+          statusText.textContent = `Procesando OCR... ${Math.round(m.progress * 100)}%`;
+        }
+      }
+    });
+
+    const rawText = data.text.trim();
+    log('OCR crudo: "' + rawText.replace(/\n/g,' / ') + '"');
+    rawBox.textContent = rawText || '(sin texto detectado)';
+    rawBox.classList.remove('hidden');
+
+    const parsed = extractDateFromText(rawText);
+
+    if (parsed) {
+      dateInput.value = parsed;
+      confSpan.innerHTML = `<span class="confidence-badge high">detectada</span>`;
+      statusText.textContent = 'Fecha detectada. Revisá y confirmá.';
+      log('Fecha interpretada: ' + parsed);
+    } else {
+      confSpan.innerHTML = `<span class="confidence-badge none">no detectada</span>`;
+      statusText.textContent = 'No se pudo interpretar una fecha automáticamente. Ingresala manualmente.';
+      dateInput.classList.add('warn-border');
+      log('No se pudo parsear una fecha del texto OCR.');
+    }
+    ocrDot.className = 'dot';
+  } catch (e) {
+    log('Error en OCR: ' + e.message);
+    statusText.textContent = 'Error procesando OCR: ' + e.message;
+    ocrDot.className = 'dot';
+    confSpan.innerHTML = `<span class="confidence-badge none">error</span>`;
+  }
+}
+
+// Intenta encontrar una fecha en el texto OCR crudo, en varios formatos comunes
+// de vencimiento (DD/MM/YYYY, DD-MM-YY, MM/YYYY, etc). Devuelve "YYYY-MM-DD" o null.
+function extractDateFromText(text) {
+  const cleaned = text.replace(/O/g, '0').replace(/[lI]/g, '1'); // errores típicos de OCR
+
+  // DD/MM/YYYY o DD-MM-YYYY o DD.MM.YYYY
+  let m = cleaned.match(/\b(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})\b/);
+  if (m) return toIsoDate(m[3], m[2], m[1]);
+
+  // DD/MM/YY
+  m = cleaned.match(/\b(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2})\b/);
+  if (m) return toIsoDate('20' + m[3], m[2], m[1]);
+
+  // MM/YYYY (vencimiento solo con mes/año)
+  m = cleaned.match(/\b(\d{1,2})[\/\-.](\d{4})\b/);
+  if (m) return toIsoDate(m[2], m[1], '01');
+
+  // YYYY-MM-DD ya en formato ISO
+  m = cleaned.match(/\b(\d{4})-(\d{1,2})-(\d{1,2})\b/);
+  if (m) return toIsoDate(m[1], m[2], m[3]);
+
+  return null;
+}
+
+function toIsoDate(y, mo, d) {
+  const yy = parseInt(y, 10);
+  const mm = parseInt(mo, 10);
+  const dd = parseInt(d, 10);
+  if (mm < 1 || mm > 12 || dd < 1 || dd > 31) return null;
+  return `${yy}-${String(mm).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
+}
+
+// =====================================================================
+// CONFIRMAR Y AGREGAR A LA LISTA
+// =====================================================================
+document.getElementById('btn-confirm-date').addEventListener('click', () => {
+  const dateVal = document.getElementById('ocr-date-input').value;
+  if (!dateVal) {
+    alert('Ingresá o confirmá una fecha antes de agregar.');
+    return;
+  }
+
+  const product = FAKE_PRODUCT_DB[currentBarcode];
+  const item = {
+    code: currentBarcode,
+    name: product ? product.name : `Producto sin nombre (código ${currentBarcode})`,
+    emoji: product ? product.emoji : '📦',
+    expiry: dateVal,
+  };
+  addedProducts.push(item);
+  log('Agregado a la lista: ' + item.name + ' — vence ' + item.expiry);
+  renderList();
+
+  // reset para el próximo escaneo
+  document.getElementById('card-product').classList.add('hidden');
+  document.getElementById('card-ocr').classList.add('hidden');
+  currentBarcode = null;
+  document.getElementById('manual-code-input').value = '';
+});
+
+function daysUntil(dateStr) {
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  const target = new Date(dateStr + 'T00:00:00');
+  return Math.round((target - today) / 86400000);
+}
+
+function renderList() {
+  const area = document.getElementById('list-area');
+  if (addedProducts.length === 0) {
+    area.innerHTML = '<div class="empty-state">Todavía no agregaste ningún producto.</div>';
+    return;
+  }
+
+  area.innerHTML = addedProducts.map((p, i) => {
+    const days = daysUntil(p.expiry);
+    let cls = 'ok', label = `vence ${p.expiry}`;
+    if (days < 0) { cls = 'expired'; label = 'vencido'; }
+    else if (days <= 7) { cls = 'soon'; label = `vence en ${days}d`; }
+
+    return `
+      <div class="list-item">
+        <div class="emoji">${p.emoji}</div>
+        <div class="info">
+          <div class="name">${p.name}</div>
+          <div class="meta">${p.code}</div>
+        </div>
+        <div class="exp ${cls}">${label}</div>
+        <button class="del" onclick="removeItem(${i})">✕</button>
+      </div>`;
+  }).join('');
+}
+
+function removeItem(i) {
+  addedProducts.splice(i, 1);
+  renderList();
+  log('Producto eliminado de la lista.');
+}
+</script>
+
+</body>
+</html>
